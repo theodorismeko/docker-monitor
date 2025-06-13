@@ -76,41 +76,146 @@ validate_webhook_url() {
     fi
 }
 
-print_status "🐳 Docker Services Monitoring - Automated Setup"
-echo "=================================================="
+# Check if running as root
+if [ "$EUID" -eq 0 ]; then
+    print_warning "Running as root user detected!"
+    print_warning "For best practices (especially on cloud VMs), it's recommended to:"
+    print_warning "1. Run as regular user (not root)"
+    print_warning "2. Add user to docker group: sudo usermod -aG docker \$USER"
+    print_warning "3. Log out and back in, then run: ./setup.sh"
+    echo ""
+    read -p "Continue anyway as root? (y/N): " continue_as_root
+    if [[ ! $continue_as_root =~ ^[Yy] ]]; then
+        print_error "Exiting. Please run as regular user for best practices."
+        exit 1
+    fi
+fi
+
+print_status "🐳 Docker Services Monitoring - Universal Setup"
+echo "================================================="
+print_status "Supports: Local development, Cloud VMs, Production servers"
+echo ""
 
 # Check prerequisites
 print_status "Checking prerequisites..."
 
 if ! command_exists docker; then
-    print_error "Docker is not installed. Please install Docker first."
-    exit 1
+    print_warning "Docker is not installed."
+    if [ "$EUID" -eq 0 ] || command -v sudo >/dev/null 2>&1; then
+        print_status "Installing Docker automatically..."
+        if command -v curl >/dev/null 2>&1; then
+            curl -fsSL https://get.docker.com -o get-docker.sh
+            if [ "$EUID" -eq 0 ]; then
+                sh get-docker.sh
+            else
+                sudo sh get-docker.sh
+            fi
+            rm get-docker.sh
+            print_success "Docker installed successfully!"
+        else
+            print_error "curl not found. Please install Docker manually: https://docs.docker.com/get-docker/"
+            exit 1
+        fi
+    else
+        print_error "Docker is not installed and cannot install automatically."
+        print_error "Please install Docker first: https://docs.docker.com/get-docker/"
+        exit 1
+    fi
 fi
 
 if ! setup_docker_compose; then
-    print_error "Docker Compose is not installed. Please install Docker Compose first."
+    print_error "Docker Compose is not available."
+    print_error "Please install Docker Compose: https://docs.docker.com/compose/install/"
     exit 1
 fi
 
 print_success "Found Docker Compose: $DOCKER_COMPOSE"
 
-# Check if user is in docker group
-if ! groups $USER | grep -q docker; then
-    print_warning "User $USER is not in the docker group."
-    print_status "Adding user to docker group..."
-    sudo usermod -aG docker $USER
-    print_warning "You need to log out and back in for group changes to take effect."
-    print_warning "After logging back in, run this script again."
+# Handle Docker group permissions intelligently
+print_status "Setting up Docker permissions..."
+current_user=${SUDO_USER:-$USER}
+
+if [ "$EUID" -eq 0 ]; then
+    # Running as root - handle the original user
+    if [ -n "$SUDO_USER" ]; then
+        if ! groups $SUDO_USER | grep -q docker; then
+            print_status "Adding user $SUDO_USER to docker group..."
+            usermod -aG docker $SUDO_USER
+            print_success "User $SUDO_USER added to docker group."
+            print_warning "The user $SUDO_USER needs to log out and back in for changes to take effect."
+        else
+            print_success "User $SUDO_USER is already in docker group!"
+        fi
+    else
+        print_warning "Running as root - Docker group not needed for root user."
+    fi
+elif ! groups $USER | grep -q docker; then
+    print_status "Adding user $USER to docker group..."
+    if sudo usermod -aG docker $USER; then
+        print_success "User $USER added to docker group!"
+        print_status "Attempting to refresh group membership..."
+        
+        # Try to refresh group membership without logout
+        if command -v newgrp >/dev/null 2>&1; then
+            print_status "Refreshing group membership with newgrp..."
+            exec newgrp docker "$0" "$@"
+        else
+            print_warning "Group membership refreshed. Testing Docker access..."
+            # Test if Docker works now
+            if docker ps >/dev/null 2>&1; then
+                print_success "Docker access confirmed!"
+            else
+                print_warning "You may need to log out and back in for Docker group changes to take effect."
+                print_warning "After logging back in, run this script again."
+                exit 1
+            fi
+        fi
+    else
+        print_error "Failed to add user to docker group. Please run with sudo or as root."
+        exit 1
+    fi
+else
+    print_success "User $USER is already in docker group!"
+fi
+
+# Test Docker access
+print_status "Testing Docker daemon access..."
+if ! docker ps >/dev/null 2>&1; then
+    print_error "Cannot access Docker daemon."
+    print_error "Please ensure:"
+    print_error "1. Docker daemon is running: sudo systemctl start docker"
+    print_error "2. User is in docker group: sudo usermod -aG docker \$USER"
+    print_error "3. Log out and back in if group was just added"
     exit 1
 fi
 
-print_success "Prerequisites check passed!"
+print_success "Docker daemon access confirmed!"
 
 # Create necessary directories
 print_status "Creating directories..."
 mkdir -p logs
 mkdir -p config
 print_success "Directories created!"
+
+# Fix file permissions (especially important for cloud VMs)
+print_status "Ensuring proper file permissions..."
+if [ "$EUID" -eq 0 ]; then
+    # Running as root - ensure files are owned by the correct user
+    if [ -n "$SUDO_USER" ]; then
+        chown -R $SUDO_USER:$SUDO_USER .
+        print_success "File ownership set to $SUDO_USER"
+    fi
+else
+    # Running as regular user - fix any root-owned files
+    if [ -f .env ] && [ "$(stat -c %U .env)" = "root" ]; then
+        print_status "Fixing .env file ownership..."
+        sudo chown $USER:$USER .env
+    fi
+    
+    # Ensure script is executable
+    chmod +x setup.sh 2>/dev/null || true
+fi
+print_success "File permissions verified!"
 
 # Setup environment configuration
 print_status "Setting up environment configuration..."

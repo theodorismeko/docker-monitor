@@ -46,27 +46,52 @@ docker-services-monitoring/
 
 ## 🚀 Quick Start
 
-### Automated Setup (Recommended)
+### Universal Automated Setup
 
-The easiest way to get started is with our automated setup script:
+The setup script works everywhere - local development, cloud VMs, production servers:
 
 ```bash
 # 1. Clone or copy the project
 git clone <repo> docker-services-monitoring
 cd docker-services-monitoring
 
-# 2. Run the automated setup
+# 2. Run the universal setup (works on any Linux system)
 ./setup.sh
 ```
 
-**That's it!** The script will:
-- ✅ Check all prerequisites (Docker, Docker Compose, user permissions)
-- ✅ Create necessary directories and configuration files
-- ✅ Guide you through Slack webhook setup with validation
-- ✅ Configure all settings with sensible defaults
-- ✅ Build and deploy the Docker container
-- ✅ Test the entire setup automatically
-- ✅ Send a test notification to verify Slack integration
+**That's it!** The script automatically handles:
+- ✅ **Environment Detection** - Local dev, cloud VMs, production servers
+- ✅ **Docker Installation** - Installs Docker if missing (with permissions)
+- ✅ **User Permissions** - Adds user to docker group automatically
+- ✅ **File Permissions** - Fixes ownership issues (common on cloud VMs)
+- ✅ **Prerequisites Check** - Docker, Docker Compose, user permissions
+- ✅ **Configuration Setup** - Guides through Slack webhook setup with validation
+- ✅ **Container Deployment** - Builds and deploys with restart policies
+- ✅ **Health Verification** - Tests entire setup automatically
+- ✅ **Test Notification** - Verifies Slack integration works
+
+### Cloud VM Deployment
+
+For cloud VMs (AWS, GCP, Azure, DigitalOcean, etc.):
+
+```bash
+# SSH into your cloud VM
+ssh user@your-cloud-vm
+
+# Clone the project
+git clone <repo> docker-services-monitoring
+cd docker-services-monitoring
+
+# Run setup (handles everything automatically)
+./setup.sh
+```
+
+**Cloud VM Features:**
+- 🌩️ **Auto Docker Installation** - Installs Docker if not present
+- 🔐 **Permission Management** - Handles user/group permissions automatically
+- 📁 **File Ownership Fix** - Corrects any permission issues
+- 🔄 **Group Refresh** - Attempts to refresh Docker group without logout
+- ⚡ **Production Ready** - Sets up with proper restart policies
 
 ### Manual Setup (For Advanced Users)
 
