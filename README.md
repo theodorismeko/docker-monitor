@@ -36,6 +36,7 @@ docker-services-monitoring/
 - 📊 **Performance Analytics**: CPU, memory, network, and disk I/O statistics
 - 🔔 **Rich Slack Integration**: Beautiful formatted notifications with status indicators
 - ⚡ **Real-time Monitoring**: Immediate alerts when containers go down or restart
+- 🔄 **Container Restart Detection**: Automatic detection of both manual and automatic container restarts
 - 📅 **Scheduled Reports**: Daily summary reports at configured times
 - ⚙️ **Flexible Configuration**: Environment-based configuration with sensible defaults
 - 🕐 **Multiple Execution Modes**: One-time, scheduled, continuous, or real-time monitoring
@@ -141,12 +142,22 @@ When using real-time monitoring, you'll receive immediate Slack notifications fo
 - Container goes from `running` → `stopped` 
 - Container goes from `running` → `dead`
 - Container is unexpectedly removed
+- Container restart fails (container doesn't come back up)
 
 **Warning Alerts (⚠️):**
 - Container status becomes `restarting`
 - Container goes from `healthy` → `unhealthy`
+- Container restarts successfully (manual or automatic)
 
-**Sample Real-time Alert:**
+**Restart Detection:**
+The system automatically detects and notifies about:
+- 🔄 **Manual Restarts**: When someone runs `docker restart <container>`
+- 🔄 **Automatic Restarts**: When Docker restarts a container due to restart policies
+- 🚨 **Failed Restarts**: When restart attempts fail and container doesn't recover
+
+**Sample Real-time Alerts:**
+
+*Container Failure:*
 ```
 🚨 Container Status Alert - CRITICAL
 
@@ -156,6 +167,85 @@ Image: nginx:latest
 Time: 2024-01-15 14:23:45
 Ports: 80→80/tcp, 443→443/tcp
 ```
+
+*Container Restart:*
+```
+🚨 Container Removed - CRITICAL
+
+Container: nginx-web
+Previous Status: running
+Time: 2024-01-15 14:25:10
+
+ℹ️ Container Added
+
+Container: nginx-web
+Status: running
+Image: nginx:latest
+Time: 2024-01-15 14:25:15
+```
+
+*Health Check Failure:*
+```
+⚠️ Container Status Alert - WARNING
+
+Container: api-server
+Status Change: running → unhealthy
+Image: myapp:latest
+Time: 2024-01-15 14:30:22
+```
+
+## 🔄 Container Restart Detection
+
+The monitoring system includes advanced restart detection capabilities that work with both scheduled and real-time monitoring modes.
+
+### How It Works
+
+**Automatic Detection:**
+- Monitors Docker's internal restart counters for automatic restarts
+- Tracks container start timestamps to detect manual restarts
+- Differentiates between planned restarts and unexpected failures
+
+**Restart Types Detected:**
+1. **Manual Restarts**: `docker restart <container>` or Docker Compose restarts
+2. **Automatic Restarts**: Docker restart policies (on-failure, unless-stopped, always)
+3. **Failed Restarts**: When restart attempts don't result in a running container
+
+**Notification Behavior:**
+- **Immediate alerts** when containers go down (critical for uptime monitoring)
+- **Confirmation alerts** when containers successfully restart
+- **Failure alerts** if restart attempts fail
+- **Cooldown period** (5 minutes) to prevent notification spam
+
+### Testing Restart Detection
+
+```bash
+# Test manual restart detection
+docker restart <container_name>
+
+# Test with real-time monitoring
+docker compose --profile realtime up -d
+docker restart docker-monitor  # Should trigger notifications
+
+# Test restart detection functionality
+python3 scripts/run_monitor.py --test-restart
+```
+
+### Configuration
+
+Restart detection works automatically with existing configuration:
+
+```bash
+# Real-time monitoring with restart detection (recommended)
+docker compose --profile realtime up -d
+
+# Check monitoring status
+docker logs docker-monitor-realtime --tail 20
+```
+
+**Environment Variables:**
+- `REALTIME_CHECK_INTERVAL`: Monitoring frequency (default: 10 seconds)
+- `NOTIFICATION_COOLDOWN`: Cooldown between notifications (default: 5 minutes)
+- `CONTAINER_NAME_FILTER`: Filter which containers to monitor for restarts
 
 ## 🔧 Configuration Options
 

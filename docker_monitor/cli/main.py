@@ -69,6 +69,11 @@ def create_argument_parser() -> argparse.ArgumentParser:
         action='store_true',
         help='Send test notification to Slack'
     )
+    mode_group.add_argument(
+        '--test-restart',
+        action='store_true',
+        help='Test restart detection functionality'
+    )
     
     # Configuration options
     parser.add_argument(
@@ -270,6 +275,11 @@ def main(argv: Optional[list] = None) -> int:
             logger.info(f"Starting real-time monitoring (every {args.realtime} seconds)...")
             monitor.monitor_containers_realtime(args.realtime)
             return 0
+        
+        elif args.test_restart:
+            logger.info("Testing restart detection functionality...")
+            success = monitor.test_restart_detection()
+            return 0 if success else 1
         
         else:
             parser.print_help()

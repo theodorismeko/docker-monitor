@@ -30,6 +30,8 @@ class RealTimeMonitor:
         # State tracking
         self.previous_states: Dict[str, str] = {}
         self.container_info: Dict[str, Dict[str, Any]] = {}
+        self.previous_restart_counts: Dict[str, int] = {}
+        self.previous_started_times: Dict[str, str] = {}
         self.monitoring = False
         self.monitor_thread: Optional[threading.Thread] = None
         
@@ -83,16 +85,21 @@ class RealTimeMonitor:
     def _monitoring_loop(self) -> None:
         """Main monitoring loop that runs in background thread."""
         logger.info("Real-time monitoring loop started")
+        logger.info(f"Initial monitoring flag value: {self.monitoring}")
         
+        cycle_count = 0
         while self.monitoring:
             try:
+                cycle_count += 1
+                logger.info(f"Starting change check cycle #{cycle_count}...")
                 self._check_for_changes()
+                logger.info(f"Change check cycle #{cycle_count} completed, sleeping for {self.check_interval} seconds")
                 time.sleep(self.check_interval)
             except Exception as e:
-                logger.error(f"Error in monitoring loop: {e}")
+                logger.error(f"Error in monitoring loop cycle #{cycle_count}: {e}")
                 time.sleep(self.check_interval)
         
-        logger.info("Real-time monitoring loop stopped")
+        logger.info(f"Real-time monitoring loop stopped (monitoring flag: {self.monitoring})")
     
     def _check_for_changes(self) -> None:
         """Check for container state changes and send notifications."""
@@ -103,9 +110,44 @@ class RealTimeMonitor:
             # Compare with previous states
             changes = self._detect_changes(current_states)
             
-            # Send notifications for critical changes
+            # Debug logging
+            if changes:
+                logger.info(f"Detected {len(changes)} changes")
+                for change in changes:
+                    logger.info(f"Change: {change['type']} for {change.get('container_info', {}).get('name', change['container_id'][:12])}")
+            else:
+                logger.info("No changes detected")
+            
+            # Process changes and send notifications
             for change in changes:
-                self._handle_state_change(change)
+                if self._should_notify(change):
+                    # Log restart events for debugging
+                    if change['type'] == 'container_restarted':
+                        self._log_restart_event(change)
+                    
+                    notification = self._create_notification(change)
+                    
+                    try:
+                        # Combine description and details for the message
+                        message_text = notification['description']
+                        if notification.get('details'):
+                            message_text += f"\n\n{notification['details']}"
+                        
+                        success = self.slack_notifier.send_custom_message(
+                            title=notification['title'],
+                            message=message_text,
+                            color=notification['color']
+                        )
+                        
+                        if success:
+                            logger.info(f"Sent notification for {change['type']}: {notification['title']}")
+                            # Update cooldown
+                            self.last_notifications[change['container_id']] = datetime.now()
+                        else:
+                            logger.error(f"Failed to send notification for {change['type']}")
+                            
+                    except Exception as e:
+                        logger.error(f"Error sending notification: {e}")
             
             # Update previous states
             self.previous_states = current_states.copy()
@@ -146,29 +188,85 @@ class RealTimeMonitor:
         # Check for state changes in existing containers
         for container_id, current_status in current_states.items():
             previous_status = self.previous_states.get(container_id)
+            container_info = self.container_info.get(container_id, {})
             
             if previous_status and previous_status != current_status:
                 change = {
                     'type': 'state_change',
                     'container_id': container_id,
-                    'container_info': self.container_info.get(container_id, {}),
+                    'container_info': container_info,
                     'previous_status': previous_status,
                     'current_status': current_status,
                     'timestamp': datetime.now()
                 }
                 changes.append(change)
+            
+            # Check for restart count changes (indicates container restarted)
+            current_restart_count = container_info.get('restart_count', 0)
+            previous_restart_count = self.previous_restart_counts.get(container_id, 0)
+            
+            if current_restart_count > previous_restart_count:
+                change = {
+                    'type': 'container_restarted',
+                    'container_id': container_id,
+                    'container_info': container_info,
+                    'previous_restart_count': previous_restart_count,
+                    'current_restart_count': current_restart_count,
+                    'current_status': current_status,
+                    'restart_type': 'automatic',
+                    'timestamp': datetime.now()
+                }
+                changes.append(change)
+                
+                # Update restart count tracking
+                self.previous_restart_counts[container_id] = current_restart_count
+            
+            # Check for manual restarts (StartedAt timestamp changes while container is running)
+            current_started_time = container_info.get('started', '')
+            previous_started_time = self.previous_started_times.get(container_id, '')
+            
+            if (current_status == 'running' and 
+                previous_started_time and 
+                current_started_time != previous_started_time and
+                previous_status == 'running'):
+                
+                change = {
+                    'type': 'container_restarted',
+                    'container_id': container_id,
+                    'container_info': container_info,
+                    'previous_started_time': previous_started_time,
+                    'current_started_time': current_started_time,
+                    'current_status': current_status,
+                    'restart_type': 'manual',
+                    'timestamp': datetime.now()
+                }
+                changes.append(change)
+            
+            # Update started time tracking
+            if current_started_time:
+                self.previous_started_times[container_id] = current_started_time
         
         # Check for new containers
         for container_id in current_states:
             if container_id not in self.previous_states:
+                container_info = self.container_info.get(container_id, {})
                 change = {
                     'type': 'container_added',
                     'container_id': container_id,
-                    'container_info': self.container_info.get(container_id, {}),
+                    'container_info': container_info,
                     'current_status': current_states[container_id],
                     'timestamp': datetime.now()
                 }
                 changes.append(change)
+                
+                # Initialize restart count tracking for new containers
+                restart_count = container_info.get('restart_count', 0)
+                self.previous_restart_counts[container_id] = restart_count
+                
+                # Initialize started time tracking for new containers
+                started_time = container_info.get('started', '')
+                if started_time:
+                    self.previous_started_times[container_id] = started_time
         
         # Check for removed containers
         for container_id in self.previous_states:
@@ -180,6 +278,12 @@ class RealTimeMonitor:
                     'timestamp': datetime.now()
                 }
                 changes.append(change)
+                
+                # Clean up restart count tracking for removed containers
+                self.previous_restart_counts.pop(container_id, None)
+                
+                # Clean up started time tracking for removed containers
+                self.previous_started_times.pop(container_id, None)
         
         return changes
     
@@ -220,6 +324,8 @@ class RealTimeMonitor:
             (change_type == 'container_removed' and previous_status == 'running'),
             # Container restarting frequently (could indicate issues)
             (current_status == 'restarting'),
+            # Container restarted (restart count increased)
+            (change_type == 'container_restarted'),
         ]
         
         return any(critical_changes)
@@ -308,4 +414,184 @@ class RealTimeMonitor:
             'containers_tracked': len(self.previous_states),
             'thread_alive': self.monitor_thread.is_alive() if self.monitor_thread else False,
             'last_check': datetime.now().isoformat()
-        } 
+        }
+    
+    def _create_notification(self, change: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a notification message for a change."""
+        change_type = change['type']
+        container_info = change.get('container_info', {})
+        container_name = container_info.get('name', change['container_id'][:12])
+        timestamp = change['timestamp'].strftime('%Y-%m-%d %H:%M:%S')
+        
+        if change_type == 'state_change':
+            previous_status = change['previous_status']
+            current_status = change['current_status']
+            
+            # Determine alert level
+            if previous_status == 'running' and current_status in ['exited', 'stopped', 'dead']:
+                alert_level = 'critical'
+                emoji = '🚨'
+                color = '#FF0000'  # Red
+                title = f"Container {container_name} STOPPED"
+                description = f"Container transitioned from `{previous_status}` to `{current_status}`"
+            elif current_status == 'restarting':
+                alert_level = 'warning'
+                emoji = '⚠️'
+                color = '#FFA500'  # Orange
+                title = f"Container {container_name} RESTARTING"
+                description = f"Container is in restarting state (may indicate issues)"
+            elif previous_status == 'running' and current_status == 'unhealthy':
+                alert_level = 'warning'
+                emoji = '⚠️'
+                color = '#FFA500'  # Orange
+                title = f"Container {container_name} UNHEALTHY"
+                description = f"Container health check failed"
+            else:
+                alert_level = 'info'
+                emoji = 'ℹ️'
+                color = '#0099CC'  # Blue
+                title = f"Container {container_name} Status Change"
+                description = f"Container transitioned from `{previous_status}` to `{current_status}`"
+        
+        elif change_type == 'container_restarted':
+            restart_type = change.get('restart_type', 'unknown')
+            current_status = change['current_status']
+            
+            if restart_type == 'automatic':
+                previous_count = change['previous_restart_count']
+                current_count = change['current_restart_count']
+                restart_diff = current_count - previous_count
+                
+                alert_level = 'warning'
+                emoji = '🔄'
+                color = '#FFA500'  # Orange
+                title = f"Container {container_name} AUTO-RESTARTED"
+                
+                if restart_diff == 1:
+                    description = f"Container automatically restarted due to failure (restart count: {previous_count} → {current_count})"
+                else:
+                    description = f"Container automatically restarted {restart_diff} times due to failures (restart count: {previous_count} → {current_count})"
+                
+                if current_status != 'running':
+                    description += f"\n⚠️ Current status: `{current_status}`"
+                    alert_level = 'critical'
+                    emoji = '🚨'
+                    color = '#FF0000'  # Red
+            
+            elif restart_type == 'manual':
+                previous_time = change.get('previous_started_time', '')
+                current_time = change.get('current_started_time', '')
+                
+                alert_level = 'warning'
+                emoji = '🔄'
+                color = '#FFA500'  # Orange
+                title = f"Container {container_name} RESTARTED"
+                description = f"Container was manually restarted (started time changed)"
+                
+                if current_status != 'running':
+                    description += f"\n⚠️ Current status: `{current_status}`"
+                    alert_level = 'critical'
+                    emoji = '🚨'
+                    color = '#FF0000'  # Red
+            
+            else:
+                alert_level = 'warning'
+                emoji = '🔄'
+                color = '#FFA500'  # Orange
+                title = f"Container {container_name} RESTARTED"
+                description = f"Container restart detected (type: {restart_type})"
+        
+        elif change_type == 'container_removed':
+            alert_level = 'critical'
+            emoji = '🚨'
+            color = '#FF0000'  # Red
+            title = f"Container {container_name} REMOVED"
+            description = f"Container was unexpectedly removed (was `{change['previous_status']}`)"
+        
+        elif change_type == 'container_added':
+            alert_level = 'info'
+            emoji = '✅'
+            color = '#00AA00'  # Green
+            title = f"Container {container_name} ADDED"
+            description = f"New container detected with status: `{change['current_status']}`"
+        
+        else:
+            alert_level = 'info'
+            emoji = 'ℹ️'
+            color = '#0099CC'  # Blue
+            title = f"Container {container_name} Event"
+            description = f"Unknown change type: {change_type}"
+        
+        # Build notification
+        notification = {
+            'alert_level': alert_level,
+            'title': f"{emoji} {title}",
+            'description': description,
+            'timestamp': timestamp,
+            'container_name': container_name,
+            'container_id': change['container_id'],
+            'color': color
+        }
+        
+        # Add container details if available
+        if container_info:
+            details = []
+            if 'image' in container_info:
+                details.append(f"**Image:** {container_info['image']}")
+            if 'ports' in container_info and container_info['ports']:
+                details.append(f"**Ports:** {container_info['ports']}")
+            if 'created' in container_info:
+                details.append(f"**Created:** {container_info['created']}")
+            
+            if details:
+                notification['details'] = '\n'.join(details)
+        
+        return notification
+
+    def test_restart_detection(self) -> None:
+        """Test restart detection functionality."""
+        logger.info("Testing restart detection...")
+        
+        try:
+            # Get current container states
+            current_states = self._get_current_states()
+            
+            # Log current restart counts
+            for container_id, container_info in self.container_info.items():
+                container_name = container_info.get('name', container_id[:12])
+                restart_count = container_info.get('restart_count', 0)
+                started_time = container_info.get('started', 'N/A')
+                status = current_states.get(container_id, 'unknown')
+                
+                logger.info(f"Container {container_name}: status={status}, restart_count={restart_count}, started={started_time}")
+            
+            logger.info("Restart detection test completed")
+            
+        except Exception as e:
+            logger.error(f"Error during restart detection test: {e}")
+
+    def _log_restart_event(self, change: Dict[str, Any]) -> None:
+        """Log restart event details for debugging."""
+        container_info = change.get('container_info', {})
+        container_name = container_info.get('name', change['container_id'][:12])
+        restart_type = change.get('restart_type', 'unknown')
+        current_status = change['current_status']
+        
+        if restart_type == 'automatic':
+            previous_count = change['previous_restart_count']
+            current_count = change['current_restart_count']
+            logger.info(
+                f"🔄 AUTO-RESTART DETECTED: {container_name} "
+                f"(restart count: {previous_count} → {current_count}, "
+                f"status: {current_status})"
+            )
+        elif restart_type == 'manual':
+            logger.info(
+                f"🔄 MANUAL RESTART DETECTED: {container_name} "
+                f"(started time changed, status: {current_status})"
+            )
+        else:
+            logger.info(
+                f"🔄 RESTART DETECTED: {container_name} "
+                f"(type: {restart_type}, status: {current_status})"
+            ) 

@@ -201,6 +201,24 @@ class DockerMonitor:
             "good"
         )
     
+    def test_restart_detection(self) -> bool:
+        """
+        Test restart detection functionality.
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        logger.info("Testing restart detection functionality...")
+        
+        try:
+            # Create a temporary real-time monitor instance
+            realtime_monitor = RealTimeMonitor(self.config)
+            realtime_monitor.test_restart_detection()
+            return True
+        except Exception as e:
+            logger.error(f"Error testing restart detection: {e}")
+            return False
+    
     def monitor_containers_continuously(self, interval_minutes: int = 5) -> None:
         """
         Monitor containers continuously at specified intervals.
