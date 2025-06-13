@@ -5,6 +5,7 @@ import time
 from typing import Optional, Dict, Any
 
 from .docker_client import DockerClient
+from .realtime_monitor import RealTimeMonitor
 from ..integrations.slack import SlackNotifier
 from ..utils.config import Config
 from ..utils.logging_config import get_logger, setup_logging
@@ -222,4 +223,37 @@ class DockerMonitor:
             logger.info("Continuous monitoring stopped by user")
         except Exception as e:
             logger.error(f"Continuous monitoring error: {e}")
+            raise
+    
+    def monitor_containers_realtime(self, interval_seconds: int = 10) -> None:
+        """
+        Monitor containers in real-time for immediate failure detection.
+        
+        Args:
+            interval_seconds: Check interval in seconds
+            
+        Note:
+            This monitors for container state changes and sends immediate notifications
+            when containers go down, restart, or have issues.
+        """
+        logger.info(f"Starting real-time monitoring with {interval_seconds} second intervals...")
+        
+        try:
+            # Import here to avoid circular imports
+            from .realtime_monitor import RealTimeMonitor
+            
+            realtime_monitor = RealTimeMonitor(self.config)
+            realtime_monitor.start_monitoring(interval_seconds)
+            
+            # Keep the main thread alive
+            try:
+                while realtime_monitor.monitoring:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                logger.info("Real-time monitoring interrupted by user")
+            finally:
+                realtime_monitor.stop_monitoring()
+                
+        except Exception as e:
+            logger.error(f"Real-time monitoring error: {e}")
             raise 

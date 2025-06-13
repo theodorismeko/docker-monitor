@@ -47,6 +47,14 @@ def create_argument_parser() -> argparse.ArgumentParser:
         help='Run continuously with specified interval in minutes'
     )
     mode_group.add_argument(
+        '--realtime',
+        type=int,
+        metavar='SECONDS',
+        nargs='?',
+        const=10,
+        help='Run real-time monitoring with specified interval in seconds (default: 10)'
+    )
+    mode_group.add_argument(
         '--test',
         action='store_true',
         help='Test Docker and Slack connections only'
@@ -252,6 +260,15 @@ def main(argv: Optional[list] = None) -> int:
             
             logger.info(f"Starting continuous monitoring (every {args.continuous} minutes)...")
             monitor.monitor_containers_continuously(args.continuous)
+            return 0
+        
+        elif args.realtime:
+            if args.realtime < 1:
+                print("❌ Real-time interval must be at least 1 second")
+                return 1
+            
+            logger.info(f"Starting real-time monitoring (every {args.realtime} seconds)...")
+            monitor.monitor_containers_realtime(args.realtime)
             return 0
         
         else:

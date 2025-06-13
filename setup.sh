@@ -298,6 +298,14 @@ daily_time=$(prompt_with_default "Daily check time (HH:MM format)" "09:00")
 log_level=$(prompt_with_default "Log level (DEBUG/INFO/WARNING/ERROR)" "INFO")
 include_stopped=$(prompt_with_default "Include stopped containers? (true/false)" "true")
 
+# Ask about monitoring mode
+echo ""
+print_status "Monitoring Mode Selection:"
+echo "1. Scheduled - Daily reports at specified time (recommended for most users)"
+echo "2. Real-time - Immediate alerts when containers go down (for critical services)"
+echo "3. Both - Run both scheduled and real-time monitoring"
+monitoring_mode=$(prompt_with_default "Choose monitoring mode (1/2/3)" "1")
+
 # Update .env with optional settings
 if [[ "$OSTYPE" == "darwin"* ]]; then
     # macOS
@@ -314,31 +322,47 @@ fi
 print_success "Configuration updated!"
 
 # Build and deploy
-print_status "Building and deploying Docker container..."
+print_status "Building and deploying Docker container(s)..."
 
 # Stop any existing containers
 if dc ps | grep -q docker-monitor; then
-    print_status "Stopping existing container..."
+    print_status "Stopping existing containers..."
     dc down
 fi
 
-# Build and start
+# Build and start based on monitoring mode
 print_status "Building Docker image..."
 dc build
 
-print_status "Starting Docker container..."
-dc up -d
+case $monitoring_mode in
+    1)
+        print_status "Starting scheduled monitoring service..."
+        dc up -d docker-monitor
+        ;;
+    2)
+        print_status "Starting real-time monitoring service..."
+        dc --profile realtime up -d docker-monitor-realtime
+        ;;
+    3)
+        print_status "Starting both scheduled and real-time monitoring services..."
+        dc --profile realtime up -d
+        ;;
+    *)
+        print_warning "Invalid monitoring mode, defaulting to scheduled monitoring..."
+        dc up -d docker-monitor
+        ;;
+esac
 
-# Wait for container to be ready
-print_status "Waiting for container to be ready..."
+# Wait for container(s) to be ready
+print_status "Waiting for container(s) to be ready..."
 sleep 5
 
-# Check if container is running
+# Check if containers are running
 if dc ps | grep -q "Up"; then
-    print_success "Container is running!"
+    print_success "Container(s) are running!"
 else
-    print_error "Container failed to start. Checking logs..."
-    dc logs docker-monitor
+    print_error "Container(s) failed to start. Checking logs..."
+    dc logs
     exit 1
 fi
 
@@ -375,23 +399,70 @@ echo ""
 print_success "🎉 Setup completed successfully!"
 echo ""
 echo "📋 What's running:"
-echo "  • Docker container: docker-monitor"
+case $monitoring_mode in
+    1)
+        echo "  • Scheduled monitoring: Daily reports at $daily_time"
+        echo "  • Container: docker-monitor"
+        ;;
+    2)
+        echo "  • Real-time monitoring: Immediate alerts for container failures"
+        echo "  • Container: docker-monitor-realtime"
+        ;;
+    3)
+        echo "  • Scheduled monitoring: Daily reports at $daily_time"
+        echo "  • Real-time monitoring: Immediate alerts for container failures"
+        echo "  • Containers: docker-monitor, docker-monitor-realtime"
+        ;;
+esac
 echo "  • Restart policy: unless-stopped"
-echo "  • Schedule: Daily at $daily_time"
 echo "  • Logs: ./logs/ directory"
 echo ""
 echo "🔧 Management commands:"
-echo "  • View logs:        $DOCKER_COMPOSE logs -f docker-monitor"
-echo "  • Restart:          $DOCKER_COMPOSE restart docker-monitor"
-echo "  • Stop:             $DOCKER_COMPOSE down"
-echo "  • Rebuild:          $DOCKER_COMPOSE up -d --build"
-echo "  • Test notification: $DOCKER_COMPOSE exec docker-monitor python3 scripts/run_monitor.py --test-notification"
-echo "  • Run once:         $DOCKER_COMPOSE exec docker-monitor python3 scripts/run_monitor.py --once"
+case $monitoring_mode in
+    1)
+        echo "  • View logs:        $DOCKER_COMPOSE logs -f docker-monitor"
+        echo "  • Restart:          $DOCKER_COMPOSE restart docker-monitor"
+        echo "  • Stop:             $DOCKER_COMPOSE down"
+        echo "  • Test notification: $DOCKER_COMPOSE exec docker-monitor python3 scripts/run_monitor.py --test-notification"
+        echo "  • Run once:         $DOCKER_COMPOSE exec docker-monitor python3 scripts/run_monitor.py --once"
+        ;;
+    2)
+        echo "  • View logs:        $DOCKER_COMPOSE --profile realtime logs -f docker-monitor-realtime"
+        echo "  • Restart:          $DOCKER_COMPOSE --profile realtime restart docker-monitor-realtime"
+        echo "  • Stop:             $DOCKER_COMPOSE --profile realtime down"
+        echo "  • Test notification: $DOCKER_COMPOSE --profile realtime exec docker-monitor-realtime python3 scripts/run_monitor.py --test-notification"
+        ;;
+    3)
+        echo "  • View all logs:    $DOCKER_COMPOSE --profile realtime logs -f"
+        echo "  • View scheduled:   $DOCKER_COMPOSE logs -f docker-monitor"
+        echo "  • View real-time:   $DOCKER_COMPOSE --profile realtime logs -f docker-monitor-realtime"
+        echo "  • Restart all:      $DOCKER_COMPOSE --profile realtime restart"
+        echo "  • Stop all:         $DOCKER_COMPOSE --profile realtime down"
+        echo "  • Test notification: $DOCKER_COMPOSE exec docker-monitor python3 scripts/run_monitor.py --test-notification"
+        ;;
+esac
 echo ""
 echo "📊 The service will automatically:"
-echo "  • Monitor all Docker containers"
-echo "  • Send daily reports to Slack at $daily_time"
-echo "  • Restart automatically if it crashes"
-echo "  • Start automatically when system boots"
+case $monitoring_mode in
+    1)
+        echo "  • Monitor all Docker containers"
+        echo "  • Send daily reports to Slack at $daily_time"
+        echo "  • Restart automatically if it crashes"
+        echo "  • Start automatically when system boots"
+        ;;
+    2)
+        echo "  • Monitor all Docker containers in real-time"
+        echo "  • Send immediate alerts when containers go down"
+        echo "  • Restart automatically if it crashes"
+        echo "  • Start automatically when system boots"
+        ;;
+    3)
+        echo "  • Monitor all Docker containers (scheduled + real-time)"
+        echo "  • Send daily reports to Slack at $daily_time"
+        echo "  • Send immediate alerts when containers go down"
+        echo "  • Restart automatically if services crash"
+        echo "  • Start automatically when system boots"
+        ;;
+esac
 echo ""
 print_success "Your Docker monitoring service is now running! 🚀" 

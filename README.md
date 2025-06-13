@@ -35,8 +35,10 @@ docker-services-monitoring/
 - 🐳 **Comprehensive Container Monitoring**: Track all containers with detailed metrics
 - 📊 **Performance Analytics**: CPU, memory, network, and disk I/O statistics
 - 🔔 **Rich Slack Integration**: Beautiful formatted notifications with status indicators
+- ⚡ **Real-time Monitoring**: Immediate alerts when containers go down or restart
+- 📅 **Scheduled Reports**: Daily summary reports at configured times
 - ⚙️ **Flexible Configuration**: Environment-based configuration with sensible defaults
-- 🕐 **Multiple Execution Modes**: One-time, scheduled, or continuous monitoring
+- 🕐 **Multiple Execution Modes**: One-time, scheduled, continuous, or real-time monitoring
 - 🧪 **Built-in Testing**: Connection testing and validation tools
 - 📝 **Logging**: Structured logging with multiple levels
 - 🎯 **Container Filtering**: Regex-based container name filtering
@@ -93,24 +95,66 @@ cd docker-services-monitoring
 - 🔄 **Group Refresh** - Attempts to refresh Docker group without logout
 - ⚡ **Production Ready** - Sets up with proper restart policies
 
-### Manual Setup (For Advanced Users)
+## 📊 Monitoring Modes
 
-If you need custom configuration or prefer manual setup:
+The setup script offers three monitoring modes to suit different needs:
+
+### 1. **Scheduled Monitoring** (Default)
+- ✅ **Best for:** Most users, development environments, regular health checks
+- 📅 **Frequency:** Daily reports at specified time (default: 9:00 AM)
+- 💬 **Notifications:** Comprehensive daily status reports
+- 🔋 **Resource Usage:** Minimal - only runs once per day
 
 ```bash
-# 1. Clone the project
-git clone <repo> docker-services-monitoring
-cd docker-services-monitoring
+# Runs daily at 9 AM
+docker compose up -d docker-monitor
+```
 
-# 2. Create configuration
-cp config/env.example .env
-nano .env  # Add your Slack webhook URL
+### 2. **Real-time Monitoring** 
+- ✅ **Best for:** Production environments, critical services, immediate alerts
+- ⚡ **Frequency:** Continuous monitoring every 10 seconds
+- 🚨 **Notifications:** Immediate alerts when containers go down, restart, or fail
+- 🔋 **Resource Usage:** Low - efficient state change detection
 
-# 3. Create logs directory
-mkdir -p logs
+```bash
+# Real-time monitoring with immediate alerts
+docker compose --profile realtime up -d docker-monitor-realtime
+```
 
-# 4. Build and run
-docker compose up -d --build
+### 3. **Both Modes**
+- ✅ **Best for:** Comprehensive monitoring
+- 📊 **Combines:** Daily reports + immediate failure alerts
+- 💪 **Coverage:** Complete monitoring solution
+- 🔋 **Resource Usage:** Moderate - runs both services
+
+```bash
+# Run both scheduled and real-time monitoring
+docker compose --profile realtime up -d
+```
+
+## 🚨 Real-time Alert Examples
+
+When using real-time monitoring, you'll receive immediate Slack notifications for:
+
+**Critical Alerts (🚨):**
+- Container goes from `running` → `exited`
+- Container goes from `running` → `stopped` 
+- Container goes from `running` → `dead`
+- Container is unexpectedly removed
+
+**Warning Alerts (⚠️):**
+- Container status becomes `restarting`
+- Container goes from `healthy` → `unhealthy`
+
+**Sample Real-time Alert:**
+```
+🚨 Container Status Alert - CRITICAL
+
+Container: nginx-web
+Status Change: running → exited
+Image: nginx:latest
+Time: 2024-01-15 14:23:45
+Ports: 80→80/tcp, 443→443/tcp
 ```
 
 ## 🔧 Configuration Options

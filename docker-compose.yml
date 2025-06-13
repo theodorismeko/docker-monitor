@@ -23,6 +23,7 @@ services:
       - ./.env:/app/.env:ro
     networks:
       - monitoring
+    # Default: scheduled daily monitoring
     command: ["python3", "scripts/run_monitor.py", "--scheduled"]
     healthcheck:
       test: ["CMD", "docker", "version"]
@@ -30,6 +31,41 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+
+  # Real-time monitoring service (optional)
+  docker-monitor-realtime:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: docker-monitor-realtime
+    restart: unless-stopped
+    environment:
+      # Load from .env file
+      - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - NOTIFICATION_ENABLED=${NOTIFICATION_ENABLED:-true}
+      - INCLUDE_STOPPED_CONTAINERS=${INCLUDE_STOPPED_CONTAINERS:-true}
+      - CONTAINER_NAME_FILTER=${CONTAINER_NAME_FILTER:-}
+      - TIMEZONE=${TIMEZONE:-UTC}
+    volumes:
+      # Mount Docker socket to monitor containers
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Mount logs directory for persistence
+      - ./logs:/app/logs
+      # Mount .env file for configuration
+      - ./.env:/app/.env:ro
+    networks:
+      - monitoring
+    # Real-time monitoring every 10 seconds
+    command: ["python3", "scripts/run_monitor.py", "--realtime", "10"]
+    healthcheck:
+      test: ["CMD", "docker", "version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    profiles:
+      - realtime
 
 networks:
   monitoring:
