@@ -269,7 +269,6 @@ class DockerMonitor:
                     time.sleep(1)
             except KeyboardInterrupt:
                 logger.info("Real-time monitoring interrupted by user")
-            finally:
                 realtime_monitor.stop_monitoring()
                 
         except Exception as e:

@@ -3,6 +3,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        BUILD_DATE: ${BUILD_DATE}
     container_name: docker-monitor
     restart: unless-stopped
     environment:
@@ -37,6 +39,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        BUILD_DATE: ${BUILD_DATE}
     container_name: docker-monitor-realtime
     restart: unless-stopped
     environment:

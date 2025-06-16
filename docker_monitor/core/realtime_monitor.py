@@ -27,20 +27,39 @@ class RealTimeMonitor:
         self.docker_client = DockerClient(self.config.docker_socket)
         self.slack_notifier = SlackNotifier(self.config.slack_webhook_url)
         
-        # State tracking
-        self.previous_states: Dict[str, str] = {}
-        self.container_info: Dict[str, Dict[str, Any]] = {}
-        self.previous_restart_counts: Dict[str, int] = {}
-        self.previous_started_times: Dict[str, str] = {}
-        self.monitoring = False
-        self.monitor_thread: Optional[threading.Thread] = None
+        # Thread synchronization
+        self._lock = threading.RLock()  # Reentrant lock for nested access
+        self._state_lock = threading.Lock()  # Separate lock for state updates
+        
+        # State tracking (protected by locks)
+        self._previous_states: Dict[str, str] = {}
+        self._container_info: Dict[str, Dict[str, Any]] = {}
+        self._previous_restart_counts: Dict[str, int] = {}
+        self._previous_started_times: Dict[str, str] = {}
+        self._monitoring = False
+        self._monitor_thread: Optional[threading.Thread] = None
         
         # Configuration
         self.check_interval = 10  # seconds
         self.notification_cooldown = 300  # 5 minutes
-        self.last_notifications: Dict[str, datetime] = {}
+        self._last_notifications: Dict[str, datetime] = {}
+        
+        # Shutdown event for graceful stopping
+        self._shutdown_event = threading.Event()
         
         logger.info("Real-time monitor initialized")
+    
+    @property
+    def monitoring(self) -> bool:
+        """Thread-safe monitoring status getter."""
+        with self._lock:
+            return self._monitoring
+    
+    @monitoring.setter
+    def monitoring(self, value: bool) -> None:
+        """Thread-safe monitoring status setter."""
+        with self._lock:
+            self._monitoring = value
     
     def start_monitoring(self, check_interval: int = 10) -> None:
         """
@@ -49,57 +68,106 @@ class RealTimeMonitor:
         Args:
             check_interval: Check interval in seconds (default: 10)
         """
-        if self.monitoring:
-            logger.warning("Real-time monitoring is already running")
-            return
+        with self._lock:
+            if self._monitoring:
+                logger.warning("Real-time monitoring is already running")
+                return
+            
+            logger.info(f"Setting up real-time monitoring with {check_interval}s interval...")
+            self.check_interval = check_interval
+            self._monitoring = True
+            self._shutdown_event.clear()
         
-        self.check_interval = check_interval
-        self.monitoring = True
+        logger.info(f"Monitoring flag set to: {self.monitoring}")
         
         # Initialize current state
+        logger.info("Initializing container states...")
         self._update_container_states()
         
         # Start monitoring thread
-        self.monitor_thread = threading.Thread(
-            target=self._monitoring_loop,
-            daemon=True,
-            name="DockerRealTimeMonitor"
-        )
-        self.monitor_thread.start()
+        logger.info("Creating monitoring thread...")
+        with self._lock:
+            self._monitor_thread = threading.Thread(
+                target=self._monitoring_loop,
+                daemon=True,
+                name="DockerRealTimeMonitor"
+            )
+        
+        logger.info(f"Thread created: {self._monitor_thread}")
+        
+        logger.info("Starting monitoring thread...")
+        self._monitor_thread.start()
+        logger.info(f"Thread started. Is alive: {self._monitor_thread.is_alive()}")
         
         logger.info(f"Real-time monitoring started (interval: {check_interval}s)")
     
     def stop_monitoring(self) -> None:
-        """Stop real-time monitoring."""
-        if not self.monitoring:
-            logger.warning("Real-time monitoring is not running")
-            return
+        """Stop real-time monitoring gracefully."""
+        logger.info("Stopping real-time monitoring...")
         
-        self.monitoring = False
+        with self._lock:
+            if not self._monitoring:
+                logger.warning("Real-time monitoring is not running")
+                return
+            
+            self._monitoring = False
+            monitor_thread = self._monitor_thread
         
-        if self.monitor_thread and self.monitor_thread.is_alive():
-            self.monitor_thread.join(timeout=5)
+        # Signal shutdown
+        self._shutdown_event.set()
+        
+        # Wait for thread to finish
+        if monitor_thread and monitor_thread.is_alive():
+            logger.info("Waiting for monitoring thread to stop...")
+            monitor_thread.join(timeout=10)
+            
+            if monitor_thread.is_alive():
+                logger.warning("Monitoring thread did not stop gracefully within timeout")
+            else:
+                logger.info("Monitoring thread stopped successfully")
         
         logger.info("Real-time monitoring stopped")
     
     def _monitoring_loop(self) -> None:
         """Main monitoring loop that runs in background thread."""
-        logger.info("Real-time monitoring loop started")
-        logger.info(f"Initial monitoring flag value: {self.monitoring}")
-        
-        cycle_count = 0
-        while self.monitoring:
-            try:
-                cycle_count += 1
-                logger.info(f"Starting change check cycle #{cycle_count}...")
-                self._check_for_changes()
-                logger.info(f"Change check cycle #{cycle_count} completed, sleeping for {self.check_interval} seconds")
-                time.sleep(self.check_interval)
-            except Exception as e:
-                logger.error(f"Error in monitoring loop cycle #{cycle_count}: {e}")
-                time.sleep(self.check_interval)
-        
-        logger.info(f"Real-time monitoring loop stopped (monitoring flag: {self.monitoring})")
+        try:
+            logger.info("Real-time monitoring loop started")
+            logger.info(f"Initial monitoring flag value: {self.monitoring}")
+            
+            if not self.monitoring:
+                logger.error("Monitoring flag is False! Loop will not start.")
+                return
+            
+            cycle_count = 0
+            logger.info("Entering monitoring while loop...")
+            
+            while self.monitoring and not self._shutdown_event.is_set():
+                try:
+                    cycle_count += 1
+                    logger.info(f"Starting change check cycle #{cycle_count}...")
+                    self._check_for_changes()
+                    logger.info(f"Change check cycle #{cycle_count} completed")
+                    
+                    # Use shutdown event for interruptible sleep
+                    if self._shutdown_event.wait(timeout=self.check_interval):
+                        logger.info("Shutdown event received, stopping monitoring loop")
+                        break
+                        
+                except Exception as e:
+                    logger.error(f"Error in monitoring loop cycle #{cycle_count}: {e}")
+                    # Still sleep on error to avoid tight error loop
+                    if self._shutdown_event.wait(timeout=self.check_interval):
+                        break
+            
+            logger.info(f"Real-time monitoring loop stopped (monitoring flag: {self.monitoring})")
+        except Exception as e:
+            logger.error(f"Fatal error in monitoring loop: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
+        finally:
+            # Ensure monitoring flag is set to False
+            with self._lock:
+                self._monitoring = False
     
     def _check_for_changes(self) -> None:
         """Check for container state changes and send notifications."""
@@ -107,8 +175,12 @@ class RealTimeMonitor:
             # Get current container states
             current_states = self._get_current_states()
             
+            # Get previous states safely
+            with self._state_lock:
+                previous_states = self._previous_states.copy()
+            
             # Compare with previous states
-            changes = self._detect_changes(current_states)
+            changes = self._detect_changes(current_states, previous_states)
             
             # Debug logging
             if changes:
@@ -141,16 +213,18 @@ class RealTimeMonitor:
                         
                         if success:
                             logger.info(f"Sent notification for {change['type']}: {notification['title']}")
-                            # Update cooldown
-                            self.last_notifications[change['container_id']] = datetime.now()
+                            # Update cooldown safely
+                            with self._lock:
+                                self._last_notifications[change['container_id']] = datetime.now()
                         else:
                             logger.error(f"Failed to send notification for {change['type']}")
                             
                     except Exception as e:
                         logger.error(f"Error sending notification: {e}")
             
-            # Update previous states
-            self.previous_states = current_states.copy()
+            # Update previous states safely
+            with self._state_lock:
+                self._previous_states = current_states.copy()
             
         except Exception as e:
             logger.error(f"Error checking for changes: {e}")
@@ -164,7 +238,7 @@ class RealTimeMonitor:
             )
             
             states = {}
-            self.container_info = {}
+            container_info = {}
             
             for container in containers:
                 container_id = container.get('id', '')
@@ -173,7 +247,11 @@ class RealTimeMonitor:
                 
                 if container_id:
                     states[container_id] = status
-                    self.container_info[container_id] = container
+                    container_info[container_id] = container
+            
+            # Update container info safely
+            with self._state_lock:
+                self._container_info = container_info
             
             return states
             
@@ -181,14 +259,14 @@ class RealTimeMonitor:
             logger.error(f"Error getting container states: {e}")
             return {}
     
-    def _detect_changes(self, current_states: Dict[str, str]) -> list:
+    def _detect_changes(self, current_states: Dict[str, str], previous_states: Dict[str, str]) -> list:
         """Detect significant state changes."""
         changes = []
         
         # Check for state changes in existing containers
         for container_id, current_status in current_states.items():
-            previous_status = self.previous_states.get(container_id)
-            container_info = self.container_info.get(container_id, {})
+            previous_status = previous_states.get(container_id)
+            container_info = self._container_info.get(container_id, {})
             
             if previous_status and previous_status != current_status:
                 change = {
@@ -203,7 +281,7 @@ class RealTimeMonitor:
             
             # Check for restart count changes (indicates container restarted)
             current_restart_count = container_info.get('restart_count', 0)
-            previous_restart_count = self.previous_restart_counts.get(container_id, 0)
+            previous_restart_count = self._previous_restart_counts.get(container_id, 0)
             
             if current_restart_count > previous_restart_count:
                 change = {
@@ -219,11 +297,12 @@ class RealTimeMonitor:
                 changes.append(change)
                 
                 # Update restart count tracking
-                self.previous_restart_counts[container_id] = current_restart_count
+                with self._state_lock:
+                    self._previous_restart_counts[container_id] = current_restart_count
             
             # Check for manual restarts (StartedAt timestamp changes while container is running)
             current_started_time = container_info.get('started', '')
-            previous_started_time = self.previous_started_times.get(container_id, '')
+            previous_started_time = self._previous_started_times.get(container_id, '')
             
             if (current_status == 'running' and 
                 previous_started_time and 
@@ -244,12 +323,13 @@ class RealTimeMonitor:
             
             # Update started time tracking
             if current_started_time:
-                self.previous_started_times[container_id] = current_started_time
+                with self._state_lock:
+                    self._previous_started_times[container_id] = current_started_time
         
         # Check for new containers
         for container_id in current_states:
-            if container_id not in self.previous_states:
-                container_info = self.container_info.get(container_id, {})
+            if container_id not in previous_states:
+                container_info = self._container_info.get(container_id, {})
                 change = {
                     'type': 'container_added',
                     'container_id': container_id,
@@ -261,29 +341,33 @@ class RealTimeMonitor:
                 
                 # Initialize restart count tracking for new containers
                 restart_count = container_info.get('restart_count', 0)
-                self.previous_restart_counts[container_id] = restart_count
+                with self._state_lock:
+                    self._previous_restart_counts[container_id] = restart_count
                 
                 # Initialize started time tracking for new containers
                 started_time = container_info.get('started', '')
                 if started_time:
-                    self.previous_started_times[container_id] = started_time
+                    with self._state_lock:
+                        self._previous_started_times[container_id] = started_time
         
         # Check for removed containers
-        for container_id in self.previous_states:
+        for container_id in previous_states:
             if container_id not in current_states:
                 change = {
                     'type': 'container_removed',
                     'container_id': container_id,
-                    'previous_status': self.previous_states[container_id],
+                    'previous_status': previous_states[container_id],
                     'timestamp': datetime.now()
                 }
                 changes.append(change)
                 
                 # Clean up restart count tracking for removed containers
-                self.previous_restart_counts.pop(container_id, None)
+                with self._state_lock:
+                    self._previous_restart_counts.pop(container_id, None)
                 
                 # Clean up started time tracking for removed containers
-                self.previous_started_times.pop(container_id, None)
+                with self._state_lock:
+                    self._previous_started_times.pop(container_id, None)
         
         return changes
     
@@ -304,40 +388,57 @@ class RealTimeMonitor:
             logger.info(f"State change detected: {change_type} for {container_name}")
     
     def _should_notify(self, change: Dict[str, Any]) -> bool:
-        """Determine if a change should trigger a notification."""
-        change_type = change['type']
-        container_id = change['container_id']
-        current_status = change.get('current_status', '')
-        previous_status = change.get('previous_status', '')
+        """
+        Determine if a change should trigger a notification.
         
-        # Check notification cooldown
+        Args:
+            change: Change information dictionary
+            
+        Returns:
+            True if notification should be sent, False otherwise
+        """
+        container_id = change.get('container_id', '')
+        
+        # Check if we're in cooldown period (thread-safe)
         if self._is_in_cooldown(container_id):
+            logger.debug(f"Skipping notification for {container_id} - in cooldown period")
             return False
         
-        # Critical state changes that should trigger notifications
+        # Always notify for critical changes
         critical_changes = [
-            # Container went from running to stopped/exited
-            (previous_status == 'running' and current_status in ['exited', 'stopped', 'dead']),
-            # Container went from healthy to unhealthy
-            (previous_status == 'running' and current_status == 'unhealthy'),
-            # Container was removed unexpectedly
-            (change_type == 'container_removed' and previous_status == 'running'),
-            # Container restarting frequently (could indicate issues)
-            (current_status == 'restarting'),
-            # Container restarted (restart count increased)
-            (change_type == 'container_restarted'),
+            'container_removed',
+            'container_failed',
+            'container_unhealthy'
         ]
         
-        return any(critical_changes)
+        if change.get('type') in critical_changes:
+            return True
+        
+        # Notify for status changes but not for routine running containers
+        if change.get('type') == 'status_changed':
+            old_status = change.get('old_status', '')
+            new_status = change.get('new_status', '')
+            
+            # Don't notify for containers that are just continuing to run
+            if old_status == 'running' and new_status == 'running':
+                return False
+            
+            return True
+        
+        # Notify for restarts
+        if change.get('type') == 'container_restarted':
+            return True
+        
+        return True
     
     def _is_in_cooldown(self, container_id: str) -> bool:
-        """Check if container is in notification cooldown period."""
-        last_notification = self.last_notifications.get(container_id)
-        if not last_notification:
+        """Check if container is in notification cooldown period (thread-safe)."""
+        with self._lock:
+            last_notification = self._last_notifications.get(container_id)
+            if last_notification:
+                time_since_last = datetime.now() - last_notification
+                return time_since_last.total_seconds() < self.notification_cooldown
             return False
-        
-        cooldown_end = last_notification + timedelta(seconds=self.notification_cooldown)
-        return datetime.now() < cooldown_end
     
     def _send_realtime_notification(self, change: Dict[str, Any]) -> None:
         """Send real-time notification for critical changes."""
@@ -393,7 +494,8 @@ class RealTimeMonitor:
             
             if success:
                 # Update cooldown tracker
-                self.last_notifications[container_id] = datetime.now()
+                with self._lock:
+                    self._last_notifications[container_id] = datetime.now()
                 logger.info(f"Real-time notification sent for {container_name}")
             else:
                 logger.error(f"Failed to send real-time notification for {container_name}")
@@ -402,19 +504,21 @@ class RealTimeMonitor:
             logger.error(f"Error sending real-time notification: {e}")
     
     def _update_container_states(self) -> None:
-        """Update the initial container states."""
-        self.previous_states = self._get_current_states()
-        logger.info(f"Initialized monitoring for {len(self.previous_states)} containers")
+        """Initialize container states safely."""
+        current_states = self._get_current_states()
+        with self._state_lock:
+            self._previous_states = current_states.copy()
+        logger.info(f"Initialized monitoring for {len(self._previous_states)} containers")
     
     def get_monitoring_status(self) -> Dict[str, Any]:
-        """Get current monitoring status."""
-        return {
-            'monitoring': self.monitoring,
-            'check_interval': self.check_interval,
-            'containers_tracked': len(self.previous_states),
-            'thread_alive': self.monitor_thread.is_alive() if self.monitor_thread else False,
-            'last_check': datetime.now().isoformat()
-        }
+        """Get current monitoring status (thread-safe)."""
+        with self._lock:
+            return {
+                'monitoring': self._monitoring,
+                'thread_alive': self._monitor_thread.is_alive() if self._monitor_thread else False,
+                'check_interval': self.check_interval,
+                'shutdown_event_set': self._shutdown_event.is_set()
+            }
     
     def _create_notification(self, change: Dict[str, Any]) -> Dict[str, Any]:
         """Create a notification message for a change."""
@@ -557,7 +661,7 @@ class RealTimeMonitor:
             current_states = self._get_current_states()
             
             # Log current restart counts
-            for container_id, container_info in self.container_info.items():
+            for container_id, container_info in self._container_info.items():
                 container_name = container_info.get('name', container_id[:12])
                 restart_count = container_info.get('restart_count', 0)
                 started_time = container_info.get('started', 'N/A')

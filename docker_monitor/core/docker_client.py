@@ -1,18 +1,24 @@
 """Docker client for container monitoring."""
 
 import re
+import threading
 from typing import List, Dict, Any, Optional
 import docker
 from docker.errors import DockerException
 
 from ..utils.logging_config import get_logger
 from ..utils.formatters import ContainerStatsFormatter, PortFormatter
+from ..exceptions import ConnectionError
 
 logger = get_logger(__name__)
 
 
+class DockerClientError(Exception):
+    """Base exception for Docker client errors."""
+    pass
+
 class DockerClient:
-    """Client for interacting with Docker daemon."""
+    """Client for interacting with Docker daemon with resource management."""
     
     def __init__(self, socket_url: str = "unix://var/run/docker.sock"):
         """
@@ -23,22 +29,48 @@ class DockerClient:
         """
         self.socket_url = socket_url
         self.client = None
+        self._lock = threading.Lock()
+        self._connected = False
         self._connect()
     
+    def __enter__(self):
+        """Context manager entry."""
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Context manager exit with cleanup."""
+        self.close()
+    
     def _connect(self) -> None:
-        """Connect to Docker daemon."""
-        try:
-            if self.socket_url == "unix://var/run/docker.sock":
-                self.client = docker.from_env()
-            else:
-                self.client = docker.DockerClient(base_url=self.socket_url)
-            
-            # Test the connection
-            self.client.ping()
-            logger.info("Successfully connected to Docker daemon")
-        except DockerException as e:
-            logger.error(f"Failed to connect to Docker daemon: {e}")
-            raise
+        """Connect to Docker daemon with proper error handling."""
+        with self._lock:
+            try:
+                if self.socket_url == "unix://var/run/docker.sock":
+                    self.client = docker.from_env()
+                else:
+                    self.client = docker.DockerClient(base_url=self.socket_url)
+                
+                # Test the connection
+                self.client.ping()
+                self._connected = True
+                logger.info("Successfully connected to Docker daemon")
+            except DockerException as e:
+                self._connected = False
+                logger.error(f"Failed to connect to Docker daemon: {e}")
+                raise ConnectionError(f"Failed to connect to Docker daemon: {e}") from e
+    
+    def close(self) -> None:
+        """Close Docker client connection and cleanup resources."""
+        with self._lock:
+            if self.client:
+                try:
+                    self.client.close()
+                    logger.info("Docker client connection closed")
+                except Exception as e:
+                    logger.warning(f"Error closing Docker client: {e}")
+                finally:
+                    self.client = None
+                    self._connected = False
     
     def get_containers(
         self,
@@ -54,8 +86,17 @@ class DockerClient:
             
         Returns:
             List of container information dictionaries
+            
+        Raises:
+            ConnectionError: If not connected to Docker daemon
         """
+        if not self.is_connected():
+            raise ConnectionError("Not connected to Docker daemon")
+            
         try:
+            if self.client is None:
+                raise ConnectionError("Docker client is not initialized")
+                
             containers = self.client.containers.list(all=include_stopped)
             container_info = []
             
@@ -91,7 +132,7 @@ class DockerClient:
             
         except DockerException as e:
             logger.error(f"Error getting container information: {e}")
-            raise
+            raise ConnectionError(f"Error getting container information: {e}") from e
     
     def _get_container_stats(self, container) -> Optional[Dict[str, Any]]:
         """
@@ -203,38 +244,71 @@ class DockerClient:
             return {'read_bytes': 'N/A', 'write_bytes': 'N/A'}
     
     def get_system_info(self) -> Dict[str, Any]:
-        """Get Docker system information."""
+        """
+        Get Docker system information.
+        
+        Returns:
+            Dictionary with system information
+            
+        Raises:
+            ConnectionError: If not connected to Docker daemon
+        """
+        if not self.is_connected():
+            raise ConnectionError("Not connected to Docker daemon")
+            
         try:
+            if self.client is None:
+                raise ConnectionError("Docker client is not initialized")
+                
             info = self.client.info()
+            version = self.client.version()
+            
             return {
-                'containers_running': info.get('ContainersRunning', 0),
-                'containers_paused': info.get('ContainersPaused', 0),
-                'containers_stopped': info.get('ContainersStopped', 0),
-                'images': info.get('Images', 0),
-                'server_version': info.get('ServerVersion', 'unknown'),
-                'kernel_version': info.get('KernelVersion', 'unknown'),
+                'server_version': version.get('Version', 'unknown'),
+                'api_version': version.get('ApiVersion', 'unknown'),
                 'operating_system': info.get('OperatingSystem', 'unknown'),
                 'architecture': info.get('Architecture', 'unknown'),
-                'cpus': info.get('NCPU', 0),
-                'total_memory': info.get('MemTotal', 0)
+                'cpus': info.get('NCPU', 'unknown'),
+                'memory_total': info.get('MemTotal', 'unknown'),
+                'containers_running': info.get('ContainersRunning', 0),
+                'containers_stopped': info.get('ContainersStopped', 0),
+                'images': info.get('Images', 0)
             }
         except DockerException as e:
-            logger.error(f"Error getting system info: {e}")
-            return {}
+            logger.error(f"Error getting system information: {e}")
+            raise ConnectionError(f"Error getting system information: {e}") from e
     
     def is_connected(self) -> bool:
-        """Check if client is connected to Docker daemon."""
-        try:
-            self.client.ping()
-            return True
-        except Exception:
-            return False
+        """
+        Check if client is connected to Docker daemon.
+        
+        Returns:
+            True if connected, False otherwise
+        """
+        with self._lock:
+            if not self.client or not self._connected:
+                return False
+            
+            try:
+                self.client.ping()
+                return True
+            except DockerException:
+                self._connected = False
+                return False
     
     def reconnect(self) -> bool:
-        """Attempt to reconnect to Docker daemon."""
+        """
+        Attempt to reconnect to Docker daemon.
+        
+        Returns:
+            True if reconnection successful, False otherwise
+        """
+        logger.info("Attempting to reconnect to Docker daemon...")
         try:
-            self._connect()
+            self.close()  # Close existing connection
+            self._connect()  # Establish new connection
+            logger.info("Successfully reconnected to Docker daemon")
             return True
         except Exception as e:
-            logger.error(f"Failed to reconnect: {e}")
+            logger.error(f"Failed to reconnect to Docker daemon: {e}")
             return False 
