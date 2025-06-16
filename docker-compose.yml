@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        BUILD_DATE: ${BUILD_DATE}
+        BUILD_DATE: ${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
     container_name: docker-monitor
     restart: unless-stopped
     environment:
@@ -13,7 +13,7 @@ services:
       - DAILY_CHECK_TIME=${DAILY_CHECK_TIME:-09:00}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - NOTIFICATION_ENABLED=${NOTIFICATION_ENABLED:-true}
-      - INCLUDE_STOPPED_CONTAINERS=${INCLUDE_STOPPED_CONTAINERS:-true}
+      - INCLUDE_STOPPED_CONTAINERS=${INCLUDE_STOPPED_CONTAINERS:-false}
       - CONTAINER_NAME_FILTER=${CONTAINER_NAME_FILTER:-}
       - TIMEZONE=${TIMEZONE:-UTC}
     volumes:
@@ -27,12 +27,6 @@ services:
       - monitoring
     # Default: scheduled daily monitoring
     command: ["python3", "scripts/run_monitor.py", "--scheduled"]
-    healthcheck:
-      test: ["CMD", "docker", "version"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
 
   # Real-time monitoring service (optional)
   docker-monitor-realtime:
@@ -40,7 +34,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        BUILD_DATE: ${BUILD_DATE}
+        BUILD_DATE: ${BUILD_DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}
     container_name: docker-monitor-realtime
     restart: unless-stopped
     environment:
@@ -48,9 +42,10 @@ services:
       - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - NOTIFICATION_ENABLED=${NOTIFICATION_ENABLED:-true}
-      - INCLUDE_STOPPED_CONTAINERS=${INCLUDE_STOPPED_CONTAINERS:-true}
+      - INCLUDE_STOPPED_CONTAINERS=${INCLUDE_STOPPED_CONTAINERS:-false}
       - CONTAINER_NAME_FILTER=${CONTAINER_NAME_FILTER:-}
       - TIMEZONE=${TIMEZONE:-UTC}
+      - REALTIME_CHECK_INTERVAL=${REALTIME_CHECK_INTERVAL:-15}
     volumes:
       # Mount Docker socket to monitor containers
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -60,17 +55,11 @@ services:
       - ./.env:/app/.env:ro
     networks:
       - monitoring
-    # Real-time monitoring every 10 seconds
-    command: ["python3", "scripts/run_monitor.py", "--realtime", "10"]
-    healthcheck:
-      test: ["CMD", "docker", "version"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
+    # Real-time monitoring every 15 seconds (reduced frequency)
+    command: ["python3", "scripts/run_monitor.py", "--realtime", "15"]
     profiles:
       - realtime
 
 networks:
   monitoring:
-    driver: bridge 
+    driver: bridge

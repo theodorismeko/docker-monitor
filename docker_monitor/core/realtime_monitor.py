@@ -192,11 +192,17 @@ class RealTimeMonitor:
             
             # Process changes and send notifications
             for change in changes:
-                if self._should_notify(change):
-                    # Log restart events for debugging
-                    if change['type'] == 'container_restarted':
-                        self._log_restart_event(change)
-                    
+                container_name = change.get('container_info', {}).get('name', change['container_id'][:12])
+                
+                # Log restart events for debugging first
+                if change['type'] == 'container_restarted':
+                    self._log_restart_event(change)
+                
+                # Check if we should notify
+                should_notify = self._should_notify(change)
+                logger.info(f"Should notify for {change['type']} on {container_name}: {should_notify}")
+                
+                if should_notify:
                     notification = self._create_notification(change)
                     
                     try:
@@ -221,6 +227,13 @@ class RealTimeMonitor:
                             
                     except Exception as e:
                         logger.error(f"Error sending notification: {e}")
+                else:
+                    logger.info(f"Skipped notification for {change['type']} on {container_name}")
+                    # Debug why notification was skipped
+                    if self._is_in_cooldown(change['container_id']):
+                        logger.info(f"  Reason: Container {container_name} is in cooldown period")
+                    else:
+                        logger.info(f"  Reason: Change type {change['type']} not configured for notification")
             
             # Update previous states safely
             with self._state_lock:

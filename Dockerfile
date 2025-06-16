@@ -1,18 +1,20 @@
-FROM python:3.11-slim
+# Use the smallest Python image
+FROM python:3.11-alpine
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
+# Install only essential system dependencies
+RUN apk add --no-cache \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/cache/apk/*
 
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies with optimizations
+RUN pip install --no-cache-dir --no-compile -r requirements.txt \
+    && pip cache purge
 
 # Add build argument to bust cache for code copying
 ARG BUILD_DATE
@@ -29,9 +31,12 @@ COPY config/ ./config/
 # Create logs directory
 RUN mkdir -p /app/logs
 
-# Set environment variables
+# Set environment variables for optimization
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1 
+ENV PYTHONOPTIMIZE=2
+
 
 # Default command - run scheduled monitoring
-CMD ["python3", "scripts/run_monitor.py", "--scheduled"] 
+CMD ["python3", "scripts/run_monitor.py", "--scheduled"]

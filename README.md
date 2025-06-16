@@ -23,7 +23,7 @@ This project follows clean architecture principles with proper separation of con
 docker-services-monitoring/
 ├── docker_monitor/              # Main package
 │   ├── core/                    # Core business logic
-│   │   ├── docker_client.py     # Docker daemon interaction
+│   │   ├── docker_client.py     # Thread-safe Docker daemon interaction
 │   │   ├── monitor.py           # Main orchestrator
 │   │   └── realtime_monitor.py  # Real-time monitoring engine
 │   ├── integrations/            # External service integrations
@@ -44,10 +44,10 @@ docker-services-monitoring/
 ## ⚡ Real-time Monitoring
 
 ### What's Implemented
-- **Continuous container monitoring** every 10 seconds (configurable)
+- **Continuous container monitoring** every 15 seconds (configurable)
 - **Instant Slack alerts** for container status changes
 - **Smart restart detection** distinguishing manual vs automatic restarts
-- **Thread-safe operations** for reliable monitoring
+- **Thread-safe operations** with proper locking and resource cleanup
 
 ### Alert Types
 **🚨 Critical Alerts:**
@@ -500,3 +500,8 @@ services:
     # OR
     command: ["python3", "scripts/run_monitor.py", "--once"]  # Run once and exit
 ```
+
+### Production Improvements
+- **Thread-Safe Docker Client**: Proper locking mechanisms and resource management
+- **Custom Exception Hierarchy**: Structured error handling (DockerMonitorError, ConnectionError, etc.)
+- **Resource Optimization**: Alpine-based containers with automatic cleanup
