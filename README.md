@@ -24,22 +24,57 @@ docker-services-monitoring/
 ├── docker_monitor/              # Main package
 │   ├── core/                    # Core business logic
 │   │   ├── docker_client.py     # Thread-safe Docker daemon interaction
-│   │   ├── monitor.py           # Main orchestrator
-│   │   └── realtime_monitor.py  # Real-time monitoring engine
+│   │   ├── docker_monitor.py    # Main orchestrator for scheduled 
+│   │   ├── realtime_monitor.py  # Real-time monitoring orchestrator
+│   │   ├── state_tracker.py     # Container state persistence and retrieval
+│   │   ├── change_detector.py   # State difference analysis and change 
+│   │   ├── notification_formatter.py # Message creation and formatting
+│   │   ├── notification_manager.py   # Notification coordination and 
+│   │   ├── cooldown_manager.py  # Notification timing and rate limiting
+│   │   └── monitoring_thread.py # Background monitoring loop management
 │   ├── integrations/            # External service integrations
 │   │   └── slack.py             # Slack notifications
 │   ├── utils/                   # Utilities and helpers
 │   │   ├── config.py            # Configuration management
 │   │   ├── formatters.py        # Data formatting utilities
 │   │   └── logging_config.py    # Logging setup
+│   ├── cli/                     # Command-line interface
+│   │   └── main.py              # CLI entry point
 │   ├── exceptions.py            # Custom exception hierarchy
-│   └── cli/                     # Command-line interface
-│       └── main.py              # CLI entry point
+│   └── docker_monitor.py        # Legacy compatibility module
 ├── scripts/                     # Executable scripts
+│   └── run_monitor.py           # Main execution script
 ├── config/                      # Configuration templates
+│   └── env.example              # Environment configuration template
 ├── tests/                       # Test suite
-└── requirements.txt             # Dependencies
+│   ├── test_config.py           # Configuration tests
+│   ├── test_restart_detection.py # Restart detection tests
+│   ├── test_slack_integration.py # Slack integration tests
+│   └── test_threading.py        # Threading safety tests
+├── docker-compose.yml           # Docker Compose configuration
+├── Dockerfile                   # Docker image definition
+├── setup.sh                     # Universal setup script
+└── requirements.txt             # Python dependencies
 ```
+
+### 🧩 Core Components 
+
+**📊 State Management:**
+- **`StateTracker`**: Manages container state persistence, retrieval, and historical tracking
+- **`ChangeDetector`**: Analyzes state differences and classifies change types (start/stop/restart)
+
+**🔔 Notification System:**
+- **`NotificationFormatter`**: Creates and formats notification messages for different event types
+- **`NotificationManager`**: Coordinates notification delivery and handles business logic
+- **`CooldownManager`**: Manages notification timing, rate limiting, and prevents spam
+
+**🔄 Monitoring Engine:**
+- **`MonitoringThread`**: Handles background monitoring loops with proper thread management
+- **`RealTimeMonitor`**: Orchestrates real-time monitoring components
+- **`DockerMonitor`**: Orchestrates scheduled monitoring workflows
+
+**🐳 Docker Integration:**
+- **`DockerClient`**: Thread-safe Docker daemon interaction with connection pooling
 
 ## ⚡ Real-time Monitoring
 
@@ -444,8 +479,7 @@ When using real-time monitoring, you'll receive immediate Slack notifications fo
 - Container restart fails (container doesn't come back up)
 
 **Warning Alerts (⚠️):**
-- Container status becomes `restarting`
-- Container goes from `healthy` → `unhealthy`
+- Container status becomes `restarting`- Container goes from `healthy` → `unhealthy`
 - Container restarts successfully (manual or automatic)
 
 **Restart Detection:**
@@ -507,9 +541,7 @@ Time: 2024-01-15 14:30:22
 | `NOTIFICATION_ENABLED` | `true` | Enable/disable Slack notifications |
 | `INCLUDE_STOPPED_CONTAINERS` | `true` | Include stopped containers in reports |
 | `CONTAINER_NAME_FILTER` | - | Regex pattern to filter container names |
-| `TIMEZONE` | `UTC` | Timezone for scheduling |
-
-## 📅 Automated Daily Reports
+| `TIMEZONE` | `UTC` | Timezone for scheduling |## 📅 Automated Daily Reports
 
 ### Universal Cron Job (Recommended)
 ```bash
@@ -617,3 +649,6 @@ services:
 - **Thread-Safe Docker Client**: Proper locking mechanisms and resource management
 - **Custom Exception Hierarchy**: Structured error handling (DockerMonitorError, ConnectionError, etc.)
 - **Resource Optimization**: Alpine-based containers with automatic cleanup
+
+
+

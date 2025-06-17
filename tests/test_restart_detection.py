@@ -10,7 +10,7 @@ import os
 # Add the project root to Python path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from docker_monitor.core.monitor import DockerMonitor
+from docker_monitor.core.docker_monitor import DockerMonitor
 from docker_monitor.utils.config import Config
 
 def main():

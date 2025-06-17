@@ -4,7 +4,7 @@ import sys
 import argparse
 from typing import Optional
 
-from ..core.monitor import DockerMonitor
+from ..core.docker_monitor import DockerMonitor
 from ..utils.config import Config
 from ..utils.logging_config import get_logger
 

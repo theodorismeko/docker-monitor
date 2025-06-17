@@ -274,3 +274,7 @@ class DockerMonitor:
         except Exception as e:
             logger.error(f"Real-time monitoring error: {e}")
             raise 
+
+
+# Backward compatibility alias
+Monitor = DockerMonitor
