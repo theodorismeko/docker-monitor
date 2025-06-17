@@ -1,4 +1,4 @@
-# Docker Container Monitoring with Slack Integration
+# 🐳 Docker Container Monitoring with Slack Integration
 
 This Python script monitors Docker containers and sends status reports to Slack with **real-time alerting** capabilities.
 
