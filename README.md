@@ -134,6 +134,56 @@ docker compose up -d docker-monitor
 python3 scripts/run_monitor.py --test
 ```
 
+## 🔗 Setting Up Slack Webhook
+
+Before running the monitoring system, you'll need to create a Slack webhook URL:
+
+### Method 1: Slack App (Recommended)
+1. **Go to [Slack API](https://api.slack.com/apps)**
+2. **Click "Create New App"** → Choose "From scratch"
+3. **Name your app** (e.g., "Docker Monitor") and select your workspace
+4. **Navigate to "Incoming Webhooks"** in the left sidebar
+5. **Toggle "Activate Incoming Webhooks"** to ON
+6. **Click "Add New Webhook to Workspace"**
+7. **Choose the channel** where you want notifications (e.g., #alerts, #monitoring)
+8. **Click "Allow"** to authorize the webhook
+9. **Copy the webhook URL** - it looks like:
+   ```
+   https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX
+   ```
+
+### Method 2: Browser/Workspace Settings
+1. **Open your Slack workspace** in browser
+2. **Go to Settings & Administration** → Manage Apps
+3. **Search for "Incoming WebHooks"** and add it
+4. **Choose a channel** for notifications
+5. **Click "Add Incoming WebHooks Integration"**
+6. **Copy the webhook URL** from the setup page
+7. **Optionally customize** the webhook name and icon
+
+### 🔧 Testing Your Webhook
+Once you have the webhook URL, test it:
+
+```bash
+# Test with curl
+curl -X POST -H 'Content-type: application/json' \
+--data '{"text":"🧪 Docker Monitor Test - Webhook is working!"}' \
+YOUR_WEBHOOK_URL
+
+# Or use the built-in test
+python3 scripts/run_monitor.py --test
+```
+
+### 📝 Adding to Configuration
+Add your webhook URL to the `.env` file:
+
+```bash
+# In your .env file
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX
+```
+
+**💡 Security Tip:** Never commit webhook URLs to version control. Always use environment variables or `.env` files (which should be in `.gitignore`).
+
 ## 📊 Monitoring Modes
 
 The setup script offers three monitoring modes to suit different needs:
