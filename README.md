@@ -136,30 +136,33 @@ python3 scripts/run_monitor.py --test
 
 ## 🔗 Setting Up Slack Webhook
 
-Before running the monitoring system, you'll need to create a Slack webhook URL:
+Before running the monitoring system, you need a Slack webhook URL to receive notifications.
 
-### Method 1: Slack App (Recommended)
-1. **Go to [Slack API](https://api.slack.com/apps)**
-2. **Click "Create New App"** → Choose "From scratch"
-3. **Name your app** (e.g., "Docker Monitor") and select your workspace
-4. **Navigate to "Incoming Webhooks"** in the left sidebar
-5. **Toggle "Activate Incoming Webhooks"** to ON
-6. **Click "Add New Webhook to Workspace"**
-7. **Choose the channel** where you want notifications (e.g., #alerts, #monitoring)
-8. **Click "Allow"** to authorize the webhook
-9. **Copy the webhook URL** - it looks like:
-   ```
-   https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX
-   ```
+### 📱 Quick Setup Guide
 
-### Method 2: Browser/Workspace Settings
-1. **Open your Slack workspace** in browser
-2. **Go to Settings & Administration** → Manage Apps
-3. **Search for "Incoming WebHooks"** and add it
-4. **Choose a channel** for notifications
-5. **Click "Add Incoming WebHooks Integration"**
-6. **Copy the webhook URL** from the setup page
-7. **Optionally customize** the webhook name and icon
+**Step 1: Create a Slack App**
+- Go to **https://api.slack.com/apps**
+- Click the big green **"Create New App"** button
+- Select **"From scratch"**
+- Enter app name: `Docker Monitor` 
+- Choose your Slack workspace from dropdown
+- Click **"Create App"**
+
+**Step 2: Enable Incoming Webhooks**
+- In your new app's settings, find **"Incoming Webhooks"** in the left menu
+- Click the toggle switch to turn it **ON** (it should turn green)
+- Click the **"Add New Webhook to Workspace"** button
+
+**Step 3: Choose Channel & Authorize**
+- Select the channel where you want alerts (create `#docker-alerts` if needed)
+- Click **"Allow"** to give the app permission
+
+**Step 4: Copy Your Webhook URL**
+- You'll see a webhook URL that looks like this:
+  ```
+  https://hooks.slack.com/services/T1234567890/B1234567890/abcdefghijklmnopqrstuvwx
+  ```
+- **Copy this entire URL** - you'll need it for configuration
 
 ### 🔧 Testing Your Webhook
 Once you have the webhook URL, test it:
@@ -183,6 +186,65 @@ SLACK_WEBHOOK_URL=https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXX
 ```
 
 **💡 Security Tip:** Never commit webhook URLs to version control. Always use environment variables or `.env` files (which should be in `.gitignore`).
+
+## 🧪 Testing the System
+
+### Running Integration Tests
+The project includes different types of test files:
+
+#### Pytest Test Suites
+These require pytest to run:
+
+```bash
+# Install pytest if not already installed
+pip install pytest
+
+# Run pytest-based test files
+python3 -m pytest tests/test_config.py -v              # Configuration tests
+python3 -m pytest tests/test_slack_integration.py -v   # Slack integration tests
+```
+
+#### Standalone Test Scripts
+These can be run directly with Python:
+
+```bash
+# Test restart detection functionality
+python3 tests/test_restart_detection.py
+
+# Test threading safety improvements
+python3 tests/test_threading.py
+```
+
+### System Integration Testing
+Test the complete monitoring pipeline:
+
+```bash
+# Test Docker connection and basic monitoring
+python3 scripts/run_monitor.py --test
+
+# Test Slack webhook integration
+python3 scripts/run_monitor.py --test-notification
+
+# Test inside Docker container
+docker-compose exec docker-monitor python3 scripts/run_monitor.py --test
+```
+
+### Test Results Example
+```bash
+❯ python3 -m pytest tests/test_config.py -v
+========================================= test session starts ==========================================
+collected 5 items                                                                                      
+
+tests/test_config.py::TestConfig::test_config_initialization_with_required_env PASSED            [ 20%]
+tests/test_config.py::TestConfig::test_config_missing_required_env_raises_error PASSED           [ 40%]
+tests/test_config.py::TestConfig::test_default_values PASSED                                     [ 60%]
+tests/test_config.py::TestConfig::test_custom_values PASSED                                      [ 80%]
+tests/test_config.py::TestConfig::test_get_all_returns_dict PASSED                               [100%]
+
+========================================== 5 passed in 0.09s ===========================================
+```
+
+**Note:** The test files use pytest framework and must be run with `python3 -m pytest` rather than direct Python execution.
 
 ## 📊 Monitoring Modes
 

@@ -235,8 +235,6 @@ DAILY_CHECK_TIME=09:00
 LOG_LEVEL=INFO
 NOTIFICATION_ENABLED=true
 INCLUDE_STOPPED_CONTAINERS=true
-CONTAINER_NAME_FILTER=
-TIMEZONE=UTC
 
 # Docker Configuration
 DOCKER_SOCKET=unix://var/run/docker.sock
@@ -331,7 +329,7 @@ print_status "Building Docker images..."
 dc build
 
 print_status "Starting all monitoring services (scheduled + real-time)..."
-dc --profile realtime up -d
+        dc --profile realtime up -d
 
 # Wait for container(s) to be ready
 print_status "Waiting for container(s) to be ready..."
@@ -379,25 +377,25 @@ echo ""
 print_success "🎉 Setup completed successfully!"
 echo ""
 echo "📋 What's running:"
-echo "  • Scheduled monitoring: Daily reports at $daily_time"
-echo "  • Real-time monitoring: Immediate alerts for container failures"
-echo "  • Containers: docker-monitor, docker-monitor-realtime"
+        echo "  • Scheduled monitoring: Daily reports at $daily_time"
+        echo "  • Real-time monitoring: Immediate alerts for container failures"
+        echo "  • Containers: docker-monitor, docker-monitor-realtime"
 echo "  • Restart policy: unless-stopped"
 echo "  • Logs: ./logs/ directory"
 echo ""
 echo "🔧 Management commands:"
-echo "  • View all logs:    $DOCKER_COMPOSE --profile realtime logs -f"
-echo "  • View scheduled:   $DOCKER_COMPOSE logs -f docker-monitor"
-echo "  • View real-time:   $DOCKER_COMPOSE --profile realtime logs -f docker-monitor-realtime"
-echo "  • Restart all:      $DOCKER_COMPOSE --profile realtime restart"
-echo "  • Stop all:         $DOCKER_COMPOSE --profile realtime down"
-echo "  • Test notification: $DOCKER_COMPOSE exec docker-monitor python3 scripts/run_monitor.py --test-notification"
+        echo "  • View all logs:    $DOCKER_COMPOSE --profile realtime logs -f"
+        echo "  • View scheduled:   $DOCKER_COMPOSE logs -f docker-monitor"
+        echo "  • View real-time:   $DOCKER_COMPOSE --profile realtime logs -f docker-monitor-realtime"
+        echo "  • Restart all:      $DOCKER_COMPOSE --profile realtime restart"
+        echo "  • Stop all:         $DOCKER_COMPOSE --profile realtime down"
+        echo "  • Test notification: $DOCKER_COMPOSE exec docker-monitor python3 scripts/run_monitor.py --test-notification"
 echo ""
 echo "📊 The service will automatically:"
-echo "  • Monitor all Docker containers (scheduled + real-time)"
-echo "  • Send daily reports to Slack at $daily_time"
-echo "  • Send immediate alerts when containers go down"
-echo "  • Restart automatically if services crash"
-echo "  • Start automatically when system boots"
+        echo "  • Monitor all Docker containers (scheduled + real-time)"
+        echo "  • Send daily reports to Slack at $daily_time"
+        echo "  • Send immediate alerts when containers go down"
+        echo "  • Restart automatically if services crash"
+        echo "  • Start automatically when system boots"
 echo ""
 print_success "Your Docker monitoring service is now running! 🚀" 
