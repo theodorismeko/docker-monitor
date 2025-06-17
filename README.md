@@ -44,7 +44,7 @@ docker-services-monitoring/
 ## ⚡ Real-time Monitoring
 
 ### What's Implemented
-- **Continuous container monitoring** every 15 seconds (configurable)
+- **Continuous container monitoring** every 10 seconds (configurable)
 - **Instant Slack alerts** for container status changes
 - **Smart restart detection** distinguishing manual vs automatic restarts
 - **Thread-safe operations** with proper locking and resource cleanup

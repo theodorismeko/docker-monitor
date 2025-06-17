@@ -45,7 +45,7 @@ services:
       - INCLUDE_STOPPED_CONTAINERS=${INCLUDE_STOPPED_CONTAINERS:-false}
       - CONTAINER_NAME_FILTER=${CONTAINER_NAME_FILTER:-}
       - TIMEZONE=${TIMEZONE:-UTC}
-      - REALTIME_CHECK_INTERVAL=${REALTIME_CHECK_INTERVAL:-15}
+      - REALTIME_CHECK_INTERVAL=${REALTIME_CHECK_INTERVAL:-5}
     volumes:
       # Mount Docker socket to monitor containers
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -55,8 +55,8 @@ services:
       - ./.env:/app/.env:ro
     networks:
       - monitoring
-    # Real-time monitoring every 15 seconds (reduced frequency)
-    command: ["python3", "scripts/run_monitor.py", "--realtime", "15"]
+    # Real-time monitoring every 5 seconds (reduced frequency)
+    command: ["python3", "scripts/run_monitor.py", "--realtime", "5"]
     profiles:
       - realtime
 

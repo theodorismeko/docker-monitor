@@ -41,7 +41,7 @@ class RealTimeMonitor:
         
         # Configuration
         self.check_interval = 10  # seconds
-        self.notification_cooldown = 300  # 5 minutes
+        self.notification_cooldown = 120  # 2 minutes 
         self._last_notifications: Dict[str, datetime] = {}
         
         # Shutdown event for graceful stopping
@@ -282,15 +282,44 @@ class RealTimeMonitor:
             container_info = self._container_info.get(container_id, {})
             
             if previous_status and previous_status != current_status:
-                change = {
-                    'type': 'state_change',
-                    'container_id': container_id,
-                    'container_info': container_info,
-                    'previous_status': previous_status,
-                    'current_status': current_status,
-                    'timestamp': datetime.now()
-                }
-                changes.append(change)
+                logger.debug(f"Container {container_info.get('name', container_id[:12])}: {previous_status} → {current_status}")
+                
+                # Check for container stop events FIRST (highest priority)
+                if previous_status == 'running' and current_status in ['stopped', 'exited', 'dead']:
+                    logger.info(f"🛑 STOP EVENT DETECTED: {container_info.get('name', container_id[:12])} ({previous_status} → {current_status})")
+                    change = {
+                        'type': 'container_stopped',
+                        'container_id': container_id,
+                        'container_info': container_info,
+                        'previous_status': previous_status,
+                        'current_status': current_status,
+                        'timestamp': datetime.now()
+                    }
+                    changes.append(change)
+                # Check for container start events specifically
+                elif previous_status in ['stopped', 'exited', 'created', 'paused'] and current_status == 'running':
+                    logger.info(f"✅ START EVENT DETECTED: {container_info.get('name', container_id[:12])} ({previous_status} → {current_status})")
+                    change = {
+                        'type': 'container_started',
+                        'container_id': container_id,
+                        'container_info': container_info,
+                        'previous_status': previous_status,
+                        'current_status': current_status,
+                        'timestamp': datetime.now()
+                    }
+                    changes.append(change)
+                else:
+                    # Regular state change for other transitions
+                    logger.debug(f"Generic state change: {container_info.get('name', container_id[:12])} ({previous_status} → {current_status})")
+                    change = {
+                        'type': 'state_change',
+                        'container_id': container_id,
+                        'container_info': container_info,
+                        'previous_status': previous_status,
+                        'current_status': current_status,
+                        'timestamp': datetime.now()
+                    }
+                    changes.append(change)
             
             # Check for restart count changes (indicates container restarted)
             current_restart_count = container_info.get('restart_count', 0)
@@ -411,37 +440,42 @@ class RealTimeMonitor:
             True if notification should be sent, False otherwise
         """
         container_id = change.get('container_id', '')
+        change_type = change.get('type', '')
         
-        # Check if we're in cooldown period (thread-safe)
-        if self._is_in_cooldown(container_id):
-            logger.debug(f"Skipping notification for {container_id} - in cooldown period")
-            return False
-        
-        # Always notify for critical changes
+        # Always notify for critical changes regardless of cooldown
         critical_changes = [
             'container_removed',
             'container_failed',
-            'container_unhealthy'
+            'container_unhealthy',
+            'container_stopped',  # Container stops are critical
+            'container_restarted',  # Restarts are important and should bypass cooldown
+            'container_started'     # Starts are important and should bypass cooldown
         ]
         
-        if change.get('type') in critical_changes:
+        if change_type in critical_changes:
             return True
+        
+        # Check cooldown for other types of changes
+        if self._is_in_cooldown(container_id):
+            logger.info(f"Skipping notification for {container_id[:12]} - in cooldown period")
+            return False
         
         # Notify for status changes but not for routine running containers
-        if change.get('type') == 'status_changed':
-            old_status = change.get('old_status', '')
-            new_status = change.get('new_status', '')
+        if change.get('type') == 'state_change':
+            previous_status = change.get('previous_status', '')
+            current_status = change.get('current_status', '')
             
             # Don't notify for containers that are just continuing to run
-            if old_status == 'running' and new_status == 'running':
+            if previous_status == 'running' and current_status == 'running':
                 return False
+            
+            # Always notify for critical state changes (running -> stopped/exited/dead)
+            if previous_status == 'running' and current_status in ['exited', 'stopped', 'dead']:
+                return True
             
             return True
         
-        # Notify for restarts
-        if change.get('type') == 'container_restarted':
-            return True
-        
+        # Default to notify for other changes
         return True
     
     def _is_in_cooldown(self, container_id: str) -> bool:
@@ -450,7 +484,10 @@ class RealTimeMonitor:
             last_notification = self._last_notifications.get(container_id)
             if last_notification:
                 time_since_last = datetime.now() - last_notification
-                return time_since_last.total_seconds() < self.notification_cooldown
+                cooldown_remaining = self.notification_cooldown - time_since_last.total_seconds()
+                if cooldown_remaining > 0:
+                    logger.debug(f"Container {container_id[:12]} in cooldown: {cooldown_remaining:.1f}s remaining")
+                    return True
             return False
     
     def _send_realtime_notification(self, change: Dict[str, Any]) -> None:
@@ -489,10 +526,26 @@ class RealTimeMonitor:
                 if container_info.get('ports'):
                     message += f"**Ports:** {container_info['ports']}\n"
                 
+            elif change_type == 'container_started':
+                title = f"{emoji} Container Started - {alert_level}"
+                message = f"**Container:** {container_name}\n"
+                message += f"**Status Change:** {previous_status} → {current_status}\n"
+                message += f"**Image:** {container_info.get('image', 'unknown')}\n"
+                message += f"**Time:** {timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                
+                if container_info.get('ports'):
+                    message += f"**Ports:** {container_info['ports']}\n"
+                
             elif change_type == 'container_removed':
                 title = f"{emoji} Container Removed - {alert_level}"
                 message = f"**Container:** {container_name}\n"
                 message += f"**Previous Status:** {previous_status}\n"
+                message += f"**Time:** {timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                
+            elif change_type == 'container_stopped':
+                title = f"{emoji} Container Stopped - {alert_level}"
+                message = f"**Container:** {container_name}\n"
+                message += f"**Status Change:** {previous_status} → {current_status}\n"
                 message += f"**Time:** {timestamp.strftime('%Y-%m-%d %H:%M:%S')}\n"
                 
             else:
@@ -510,6 +563,7 @@ class RealTimeMonitor:
                 with self._lock:
                     self._last_notifications[container_id] = datetime.now()
                 logger.info(f"Real-time notification sent for {container_name}")
+                logger.debug(f"Added cooldown for {container_id[:12]} until {(datetime.now() + timedelta(seconds=self.notification_cooldown)).strftime('%H:%M:%S')}")
             else:
                 logger.error(f"Failed to send real-time notification for {container_name}")
                 
@@ -617,6 +671,22 @@ class RealTimeMonitor:
                 color = '#FFA500'  # Orange
                 title = f"Container {container_name} RESTARTED"
                 description = f"Container restart detected (type: {restart_type})"
+        
+        elif change_type == 'container_started':
+            previous_status = change['previous_status']
+            alert_level = 'info'
+            emoji = '✅'
+            color = '#00AA00'  # Green
+            title = f"Container {container_name} STARTED"
+            description = f"Container started successfully (transitioned from `{previous_status}` to `running`)"
+        
+        elif change_type == 'container_stopped':
+            current_status = change['current_status']
+            alert_level = 'critical'
+            emoji = '🚨'
+            color = '#FF0000'  # Red
+            title = f"Container {container_name} STOPPED"
+            description = f"Container stopped (transitioned from `running` to `{current_status}`)"
         
         elif change_type == 'container_removed':
             alert_level = 'critical'
