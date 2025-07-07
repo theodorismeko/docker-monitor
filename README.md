@@ -645,10 +645,4 @@ services:
     command: ["python3", "scripts/run_monitor.py", "--once"]  # Run once and exit
 ```
 
-### Production Improvements
-- **Thread-Safe Docker Client**: Proper locking mechanisms and resource management
-- **Custom Exception Hierarchy**: Structured error handling (DockerMonitorError, ConnectionError, etc.)
-- **Resource Optimization**: Alpine-based containers with automatic cleanup
-
-
 
